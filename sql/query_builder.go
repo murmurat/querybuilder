@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
-	"gitlab.com/golang-libs/databases.git/relational"
 	"reflect"
 	"strings"
 )
@@ -17,60 +16,51 @@ const (
 )
 
 func AddRow(tx *sqlx.Tx, object any, tableName string) error {
-	_, err := relational.DoX(func(tx *sqlx.Tx) (interface{}, error) {
-		query := generateInsertQuery(object, tableName)
-		valuesMap := getValuesMap(object)
-		return tx.NamedExec(query, valuesMap)
-	}, tx)
+	query := generateInsertQuery(object, tableName)
+	valuesMap := getValuesMap(object)
+	_, err := tx.NamedExec(query, valuesMap)
 	return err
 }
 
 func UpdateRow(tx *sqlx.Tx, object any, tableName string, keyField string) error {
-	_, err := relational.DoX(func(tx *sqlx.Tx) (interface{}, error) {
-		query := generateUpdateQuery(object, tableName, keyField)
-		valuesMap := getValuesMap(object)
-		return tx.NamedExec(query, valuesMap)
-	}, tx)
+	query := generateUpdateQuery(object, tableName, keyField)
+	valuesMap := getValuesMap(object)
+	_, err := tx.NamedExec(query, valuesMap)
 	return err
 }
 
 func Exists(tx *sqlx.Tx, tableName string, fieldName string, val interface{}) (bool, error) {
-	_, err := relational.DoX(func(tx *sqlx.Tx) (interface{}, error) {
-		query := fmt.Sprintf(`SELECT 1 FROM %s WHERE %s = $1 LIMIT 1;`, tableName, fieldName)
-		var exists int
-		return nil, tx.QueryRowx(query, val).Scan(&exists)
-	}, tx)
+	query := fmt.Sprintf(`SELECT 1 FROM %s WHERE %s = $1 LIMIT 1;`, tableName, fieldName)
 
+	var exists int
+	err := tx.QueryRowx(query, val).Scan(&exists)
 	if err != nil && errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
+
 	return true, err
 }
 
 func UpsertRow(tx *sqlx.Tx, object any, tableName string, keyField string) (opType string, err error) {
-	_, err = relational.DoX(func(tx *sqlx.Tx) (interface{}, error) {
-		keyValue, err := getFieldValueByTag(object, keyField)
-		if err != nil {
-			return nil, err
-		}
+	keyValue, err := getFieldValueByTag(object, keyField)
+	if err != nil {
+		return
+	}
 
-		exists, err := Exists(tx, tableName, keyField, keyValue)
-		if err != nil {
-			return nil, err
-		}
+	exists, err := Exists(tx, tableName, keyField, keyValue)
+	if err != nil {
+		return
+	}
 
-		if exists {
-			opType = update
-			err = UpdateRow(tx, object, tableName, keyField)
-			return nil, err
-		}
+	if exists {
+		opType = update
+		err = UpdateRow(tx, object, tableName, keyField)
+		return
+	}
 
-		opType = insert
-		err = AddRow(tx, object, tableName)
-		return nil, err
-	}, tx)
-
-	return opType, err
+	opType = insert
+	err = AddRow(tx, object, tableName)
+	return
 }
 
 func generateInsertQuery(obj interface{}, tableName string) string {
